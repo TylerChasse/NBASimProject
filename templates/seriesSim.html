@@ -1,0 +1,101 @@
+{% extends 'layout.html' %}
+
+{% block content %}
+    <div class="results">
+        <h1 style=color:white>Series Simulator</h1>
+        <div class="dropdown">
+            <div class="select">
+                <span class="selected">Team 1</span>
+                <div class="caret"></div>
+            </div>
+            <ul class="menu" id="team1">
+                <li class="active">Select</li>
+                <li>ATL</li>
+                <li>BOS</li>
+                <li>BKN</li>
+                <li>CHA</li>
+                <li>CHI</li>
+                <li>CLE</li>
+                <li>DET</li>
+                <li>IND</li>
+                <li>MIA</li>
+                <li>MIL</li>
+                <li>NYK</li>
+                <li>ORL</li>
+                <li>PHI</li>
+                <li>TOR</li>
+                <li>WAS</li>
+                <li>DAL</li>
+                <li>DEN</li>
+                <li>GSW</li>
+                <li>HOU</li>
+                <li>LAC</li>
+                <li>LAL</li>
+                <li>MEM</li>
+                <li>MIN</li>
+                <li>NOP</li>
+                <li>OKC</li>
+                <li>PHX</li>
+                <li>POR</li>
+                <li>SAC</li>
+                <li>SAS</li>
+                <li>UTA</li>
+            </ul>
+        </div>
+        <div class="dropdown">
+            <div class="select">
+                <span class="selected">Team 2</span>
+                <div class="caret"></div>
+            </div>
+            <ul class="menu" id="team2">
+                <li class="active">Select</li>
+                <li>ATL</li>
+                <li>BOS</li>
+                <li>BKN</li>
+                <li>CHA</li>
+                <li>CHI</li>
+                <li>CLE</li>
+                <li>DET</li>
+                <li>IND</li>
+                <li>MIA</li>
+                <li>MIL</li>
+                <li>NYK</li>
+                <li>ORL</li>
+                <li>PHI</li>
+                <li>TOR</li>
+                <li>WAS</li>
+                <li>DAL</li>
+                <li>DEN</li>
+                <li>GSW</li>
+                <li>HOU</li>
+                <li>LAC</li>
+                <li>LAL</li>
+                <li>MEM</li>
+                <li>MIN</li>
+                <li>NOP</li>
+                <li>OKC</li>
+                <li>PHX</li>
+                <li>POR</li>
+                <li>SAC</li>
+                <li>SAS</li>
+                <li>UTA</li>
+            </ul>
+        </div>
+        <script>
+            function editFormAction() {
+                var form = document.getElementById('go');
+                team1Abb = document.getElementsByClassName('active')[0].innerText;
+                team2Abb = document.getElementsByClassName('active')[1].innerText;
+                start = "/seriessim/"
+                form.action = start.concat(team1Abb, "/", team2Abb);
+            };
+        </script>
+        <form action="" id="go" name="go" method="POST, GET" onclick="editFormAction()">
+            <button class="button">Go</button>
+        </form>
+        
+        <div>
+            {{ data }}
+        </div>
+    </div>
+{% endblock content %}

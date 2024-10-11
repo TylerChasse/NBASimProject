@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+
+<html>
+    <head>
+        <meta charset="utf-8" />
+        <title>NBA Simulator</title>
+        <style>
+            body {
+                font-family: Helvetica, sans-serif;
+                background: #23242a;
+                min-height: 100vh;
+                justify-content: center;
+                align-items: center;
+                text-align: center;
+                white-space: pre-line;
+                color: white
+            }
+            .dropdown {
+                min-width: 15em;
+                position: relative;
+                margin: 2em;
+            }
+            .dropdown * {
+                box-sizing: border-box;
+            }
+            .select {
+                background: #2a2f3b;
+                color: #fff;
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                border: 2px #2a2f3b solid;
+                border-radius: 0.5em;
+                padding: 1em;
+                cursor: pointer;
+                transition: background 0.3s;
+            }
+            .menu {
+                list-style: none;
+                padding: 0.2em 0.5em;
+                background: #323741;
+                border: 1px #363a43 solid;
+                box-shadow: 0 0.5em  1em rgba(0, 0, 0, 0.2);
+                border-radius: 0.5em;
+                color: #9fa5b5;
+                position: absolute;
+                top: 3em;
+                left: 50%;
+                width: 100%;
+                opacity: 0;
+                transform: translate(-50%);
+                display: none;
+                transition: 0.2s;
+                z-index: 1;
+            }
+            .menu li {
+                padding: 0.7em 0.5em;
+                margin: 0.3em 0;
+                border-radius: 0.5em;
+                cursor: pointer;
+            }
+            .menu li:hover {
+                background: #2a2d35;
+            }
+            .active {
+                background: #23242a;
+            }
+            .menu-open {
+                display: block;
+                opacity: 1;
+            }
+            .caret {
+                width: 0;
+                height: 0;
+                border-left: 5px solid transparent;
+                border-right: 5px solid transparent;
+                border-top: 6px solid #fff;
+                transition: 0.3s;
+            }
+            .caret-rotate {
+                transform: rotate(180deg);
+            }
+            .select-clicked {
+                border: 2px #26489a solid;
+                box-shadow: 0 0 0.8em #26489a;
+            }
+            .select:hover {
+                background: #323741;
+            }
+            div {
+                color: white
+            }
+            .button {
+                list-style: none;
+                padding: 0.2em 0.5em;
+                background: #323741;
+                border: 1px #363a43 solid;
+                box-shadow: 0 0.5em  1em rgba(0, 0, 0, 0.2);
+                border-radius: 0.5em;
+                color: #eff0f4;
+                top: 3em;
+                left: 50%;
+                transition: 0.2s;
+                z-index: 1;
+                justify-content: center;
+                align-items: center;
+                text-align: center;
+            }
+            h1 {
+                display: block;
+            }
+            form {
+                display: block;
+            }
+            .results {
+                display: flex;
+                flex-wrap: wrap;
+                justify-content: center;
+                align-items: center;
+                text-align: center;
+                white-space: pre-line;
+                color: white;
+            }
+            .header {
+                display: flex;
+                white-space: pre;
+                justify-content: center;
+                align-items: center;
+            }
+        </style>
+        
+
+    </head>
+
+    <body>
+        <div class="header">
+            <h1 style=color:white>NBA Simulator</h1>
+            
+            <form action="/singlegamesim", method="POST, GET">
+                <button  class="button">Single Game Sim</button>
+            </form>
+
+            <form action="/seriessim", method="POST, GET">
+                <button class="button">Series Sim</button>
+            </form>
+        
+            <form action="/seasonsim", method="POST, GET">
+                <button class="button">Season Sim</button>
+            </form>
+        </div>  
+        
+        {% block content %}
+            
+        {% endblock content %}
+        
+        <script>
+            const dropdowns = document.querySelectorAll('.dropdown');
+            dropdowns.forEach(dropdown => {
+                const select = dropdown.querySelector('.select');
+                const caret = dropdown.querySelector('.caret');
+                const menu = dropdown.querySelector('.menu');
+                const options = dropdown.querySelectorAll('.menu li');
+                const selected = dropdown.querySelector('.selected');
+
+                select.addEventListener('click', () => {
+                    select.classList.toggle('select-clicked');
+                    caret.classList.toggle('caret-rotate');
+                    menu.classList.toggle('menu-open');
+                });
+
+                options.forEach(option => {
+                    option.addEventListener('click', () => {
+                        selected.innerText = option.innerText;
+                        select.classList.remove('select-clicked');
+                        caret.classList.remove('caret-rotate');
+                        menu.classList.remove('menu-open');
+
+                        options.forEach(option => {
+                            option.classList.remove('active');
+                        });
+                        option.classList.add('active');
+                    });
+                });
+            });
+        </script>
+    </body>
+
+</html>
