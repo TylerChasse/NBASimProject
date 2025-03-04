@@ -1,20 +1,21 @@
 from flask import Flask, render_template
-app = Flask(__name__)
+app = Flask(__name__, template_folder='C:/Users/22cha/OneDriveChamplainCollege/nba_project/templates')
 
 from sims import singleGameSim
 from sims import seriesSim
 from sims import seasonSim
+from sims import breakTiebreaker
 import pickle
 
-LEAGUEID = "00"
-SEASONTYPE = "Regular Season"
-SEASON = "2023-24"
-SEASONENDDATE = 20240414
-SEASONSTART = True
-
 class Team:
-    def __init__(self, abb, stats):
+    def __init__(self, abb, id, div, conf, totalPoints, stats):
         self.abbreviation = abb
+        self.ID = id
+        self.division = div
+        self.conference = conf
+        self.divisionWinner = False
+        self.playoffTeam = False
+        self.points = totalPoints ### make setter that adds to this?
         self.teamTwoPerc = stats[0]
         self.oppTwoPerc = stats[1]
         self.teamThreePerc = stats[2]
@@ -35,26 +36,28 @@ class Team:
         self.wins = stats[17]
         self.losses = stats[18]
         self.gamesPlayed = stats[19]
-        '''self.shotChance = stats[20]
+        '''
+        sim 2.0 stats
+        self.shotChance = stats[20]
         self.TOChance = stats[21]
         self.CFDChance = stats[22]
         self.oppShotChance = stats[23]
         self.oppTOChance = stats[24]
         self.CFCChance = stats[25]'''
 
-with open('scrapeResults.pickle', 'rb') as pklFile:
+with open('../pklFiles/scrapeResults.pickle', 'rb') as pklFile:
     # {abb: list of stats}
     Teams = pickle.load(pklFile)
-    #print(Teams)
 pklFile.close()
 
 for key, value in Teams.items():
-    Teams[key] = Team(key, Teams[key])
+    #                 abb         ID              division         conference      total points
+    Teams[key] = Team(key, Teams[key][0][0], Teams[key][0][1], Teams[key][0][2], Teams[key][0][3], Teams[key][1])
     #if SEASONSTART:
        # Teams[key].wins = 0
        # Teams[key].losses = 0
 
-
+#breakTiebreaker(Teams['bos'], Teams['cle'])
 @app.route("/", methods=['GET'])
 def home():
     return render_template("nbaSim.html")
@@ -85,9 +88,6 @@ def goToSeasonSim():
 def runSeasonSim():
     results = seasonSim()
     return render_template("seasonSim.html", data=results)
-
-####### shooting chance is low, should be around 72%, check all to and pf stats #######################################
-####### add to shooting number for shooting fouls and and-1s
 
 if __name__ == "__main__":
     app.run()

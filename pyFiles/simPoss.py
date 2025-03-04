@@ -2,44 +2,14 @@ from nba_api.stats.static import teams
 import random
 from numpy.random import choice
 from datetime import date
-import requests
-from bs4 import BeautifulSoup
-from scrape import readScheduleFile
-
-LEAGUEID = "00"
-SEASONTYPE = "Regular Season"
-SEASON = "2023-24"
-SEASONENDDATE = 20240414
-SEASONSTART = True
-SEASONSTARTDATE = 20231024
-ALLSTARDATE = 20230218
-DEBUG_STATS = True
-
-games = 0
-possessions = 0
-shots = 0
-TOs = 0
-PFs = 0
-made2s = 0
-attempted2s = 0
-made3s = 0
-attempted3s = 0
-commonPFs = 0
-shootingPFs = 0
-madeFTs = 0
-attemptedFTs = 0
-score_1 = 0
-score_2 = 0
-simScore_1 = 0
-simScore_2 = 0
-
+from pyFiles.scrape import readScheduleFile
+from pyFiles import basicInfo as bi
 
 # functions that take into account opp stats
 def getTwoPerc(team1, team2):
     team1TwoPerc = (team1.teamTwoPerc + team2.oppTwoPerc) / 2
     team2TwoPerc = (team2.teamTwoPerc + team1.oppTwoPerc) / 2
     return team1TwoPerc, team2TwoPerc
-
 
 def getThreePerc(team1, team2):
     team1ThreePerc = (team1.teamThreePerc + team2.oppThreePerc) / 2
@@ -77,8 +47,94 @@ def getShootingFoulPerc(team1, team2):
     # print(team1ShootingFoulPerc, team2ShootingFoulPerc) ###
     return team1ShootingFoulPerc, team2ShootingFoulPerc
 
+def simPoss(off, offStats, defStats, defFouls, defLast2MinFouls, bonus, time):
+    points = 0
+    possession = 0
+    addTime = False
+
+    outcome = choice(["Shot", "Turnover", "Foul"], 1,
+                     p=[offStats['ShotFreq'], offStats['TO%'], defStats['PF%']])
+    if outcome == "Shot":
+        shotType = choice(["Two", "Three"], 1, p=[off.twoFrequency, off.threeFrequency])
+        if shotType == "Two":
+            shot = choice(["Make", "Miss"], 1, p=[offStats['2%'], (1 - offStats['2%'])])
+            if shot == "Make":
+                points += 2
+                possession = 2
+            elif shot == "Miss":
+                possession = choice([1, 2], 1, p=[offStats['OREB%'], defStats['DREB%']])
+                if possession == 1:
+                    # right now oreb doesn't start new possession, so time and possession taken off for possession
+                    # is put back on
+                    addTime = True
+        if shotType == "Three":
+            shot = choice(["Make", "Miss"], 1, p=[offStats['3%'], (1 - offStats['3%'])])
+            if shot == "Make":
+                points += 3
+                possession = 2
+            elif shot == "Miss":
+                possession = choice([1, 2], 1, p=[offStats['OREB%'], defStats['DREB%']])
+                if possession == 1:
+                    addTime = True
+    elif outcome == "Turnover":
+        possession = 2
+    elif outcome == "Foul":
+        defFouls += 1
+        if time <= 120:
+            defLast2MinFouls += 1
+        foulType = choice(["Common", "Shooting"], 1, p=[(1 - defStats['SF%']), defStats['SF%']])
+        if foulType == "Shooting":
+            foulType = choice(["Shooting", "And1_2", "And1_3"], 1,
+                              p=[(1 - off.twoPointAnd1Chance - off.threePointAnd1Chance),
+                                 off.twoPointAnd1Chance, off.threePointAnd1Chance])
+        if foulType == "Common" and (defFouls < bonus and defLast2MinFouls < 2):
+            possession = 1
+        elif foulType == "Common" and (defFouls >= bonus or defLast2MinFouls >= 2):
+            foulType = "Shooting"
+        elif foulType == "And1_2":
+            points += 2
+            freeThrow = choice(["Make", "Miss"], 1,
+                               p=[off.teamFreeThrowPerc, (1 - off.teamFreeThrowPerc)])
+            if freeThrow == "Make":
+                points += 1
+                possession = 2
+            elif freeThrow == "Miss":
+                possession = choice([1, 2], 1, p=[offStats['OREB%'], defStats['DREB%']])
+                if possession == 1:
+                    addTime = True
+        elif foulType == "And1_3":
+            points += 3
+            freeThrow = choice(["Make", "Miss"], 1,
+                               p=[off.teamFreeThrowPerc, (1 - off.teamFreeThrowPerc)])
+            if freeThrow == "Make":
+                points += 1
+                possession = 2
+            elif freeThrow == "Miss":
+                possession = choice([1, 2], 1, p=[offStats['OREB%'], defStats['DREB%']])
+                if possession == 1:
+                    addTime = True
+        if foulType == "Shooting":
+            freeThrow1 = choice(["Make", "Miss"], 1,
+                                p=[off.teamFreeThrowPerc, (1 - off.teamFreeThrowPerc)])
+            if freeThrow1 == "Make":
+                points += 1
+            elif freeThrow1 == "Miss":
+                points += 0
+            freeThrow2 = choice(["Make", "Miss"], 1,
+                                p=[off.teamFreeThrowPerc, (1 - off.teamFreeThrowPerc)])
+            if freeThrow2 == "Make":
+                points += 1
+                possession = 2
+            elif freeThrow2 == "Miss":
+                possession = choice([1, 2], 1, p=[offStats['OREB%'], defStats['DREB%']])
+                if possession == 1:
+                    # print("OREB")
+                    addTime = True
+
+    return points, possession, addTime, defFouls, defLast2MinFouls
 
 def singleGameSim(team1Abb, team2Abb, team1=None, team2=None):
+    # update stats in outer scope so they can be used elsewhere
     global games, possessions, shots, TOs, PFs, made2s, attempted2s, made3s, attempted3s, commonPFs, shootingPFs,\
         madeFTs, attemptedFTs, score_1, score_2, simScore_1, simScore_2
     if team1Abb == 'Select' or team2Abb == 'Select':
@@ -87,6 +143,8 @@ def singleGameSim(team1Abb, team2Abb, team1=None, team2=None):
         team1 = Teams[team1Abb]
     if team2 == None:
         team2 = Teams[team2Abb]
+
+    # get team stats
     team1TwoPerc, team2TwoPerc = getTwoPerc(team1, team2)
     team1ThreePerc, team2ThreePerc = getThreePerc(team1, team2)
     team1OREBPerc, team2OREBPerc = getOREBPerc(team1, team2)
@@ -96,43 +154,26 @@ def singleGameSim(team1Abb, team2Abb, team1=None, team2=None):
     team1ShootingFoulPerc, team2ShootingFoulPerc = getShootingFoulPerc(team1, team2)
     team1ShotFrequency = 1 - (team1TurnoverPerc + team2PFPerc)
     team2ShotFrequency = 1 - (team2TurnoverPerc + team1PFPerc)
+    # nba avg
     timePerPossession = 14.4
+
+    team1Stats = {"2%": team1TwoPerc, "3%": team1ThreePerc, "OREB%": team1OREBPerc, "DREB%": team1DREBPerc,
+                  "TO%": team1TurnoverPerc, "PF%": team1PFPerc, "SF%": team1ShootingFoulPerc,
+                  "ShotFreq": team1ShotFrequency}
+    team2Stats = {"2%": team2TwoPerc, "3%": team2ThreePerc, "OREB%": team2OREBPerc, "DREB%": team2DREBPerc,
+                  "TO%": team2TurnoverPerc, "PF%": team2PFPerc, "SF%": team2ShootingFoulPerc,
+                  "ShotFreq": team2ShotFrequency}
 
     quarter = 1
     team1Score = 0
     team2Score = 0
     possession = random.randint(1, 2)
 
-    shot1 = 0
-    to1 = 0
-    foul1 = 0
-    common1 = 0
-    shooting1 = 0
-    make2_1 = 0
-    miss2_1 = 0
-    make3_1 = 0
-    miss3_1 = 0
-    ftMake1 = 0
-    ftMiss1 = 0
-    shot2 = 0
-    to2 = 0
-    foul2 = 0
-    common2 = 0
-    shooting2 = 0
-    make2_2 = 0
-    miss2_2 = 0
-    make3_2 = 0
-    miss3_2 = 0
-    ftMake2 = 0
-    ftMiss2 = 0
-    poss = 0
-    team1TotalFouls = 0
-    team2TotalFouls = 0
-
     #print('\n')
     #print(team1ShotFrequency, team1TurnoverPerc, team2PFPerc)
     #print(team2ShotFrequency, team2TurnoverPerc, team1PFPerc)
 
+    # start game
     while quarter <= 4 or (quarter >= 5 and team1Score == team2Score):
         team1Fouls = 0
         team1Last2MinFouls = 0
@@ -141,296 +182,123 @@ def singleGameSim(team1Abb, team2Abb, team1=None, team2=None):
         if quarter <= 4:
             time = 720
             bonus = 5
+        # overtime
         elif quarter >= 5 and team1Score == team2Score:
             time = 300
             bonus = 4
         while time > 0:
+            possessionPoints = 0
+            addTime = False
+            # set offensive and defensive teams
             if possession == 1:
-                poss += 1
-                #print("BOS Ball")
-                outcome = choice(["Shot", "Turnover", "Foul"], 1,
-                                 p=[team1ShotFrequency, team1TurnoverPerc, team2PFPerc])
-                if outcome == "Shot":
-                    shot1 += 1  ###
-                    shotType = choice(["Two", "Three"], 1, p=[team1.twoFrequency, team1.threeFrequency])
-                    if shotType == "Two":
-                        shot = choice(["Make", "Miss"], 1, p=[team1TwoPerc, (1 - team1TwoPerc)])
-                        if shot == "Make":
-                            #print("Made 2")  ###
-                            make2_1 += 1  ###
-                            team1Score += 2
-                            possession = 2
-                        elif shot == "Miss":
-                            #("Missed 2")  ###
-                            miss2_1 += 1  ###
-                            possession = choice([1, 2], 1, p=[team1OREBPerc, team2DREBPerc])
-                            if possession == 1:
-                                #print("OREB")
-                                poss -= 1
-                                time += timePerPossession
-                    if shotType == "Three":
-                        shot = choice(["Make", "Miss"], 1, p=[team1ThreePerc, (1 - team1ThreePerc)])
-                        if shot == "Make":
-                            #print("Made 3")  ###
-                            make3_1 += 1  ###
-                            team1Score += 3
-                            possession = 2
-                        elif shot == "Miss":
-                            #print("Missed 3")  ###
-                            miss3_1 += 1  ###
-                            possession = choice([1, 2], 1, p=[team1OREBPerc, team2DREBPerc])
-                            if possession == 1:
-                                #print("OREB")
-                                poss -= 1
-                                time += timePerPossession
-                elif outcome == "Turnover":
-                    #print("Turnover")  ###
-                    to1 += 1  ###
-                    possession = 2
-                elif outcome == "Foul":
-                    foul1 += 1  ###
-                    team2Fouls += 1
-                    if time <= 120:
-                        team2Last2MinFouls += 1
-                    foulType = choice(["Common", "Shooting"], 1, p=[(1 - team2ShootingFoulPerc), team2ShootingFoulPerc])
-                    if foulType == "Shooting":
-                        shot1 += 1  ###
-                        foulType = choice(["Shooting", "And1_2", "And1_3"], 1,
-                                          p=[(1 - team1.twoPointAnd1Chance - team1.threePointAnd1Chance),
-                                             team1.twoPointAnd1Chance, team1.threePointAnd1Chance])
-                    if foulType == "Common" and (team2Fouls < bonus and team2Last2MinFouls < 2):
-                        #print("Common Foul")  ###
-                        common1 += 1  ###
-                        possession = 1
-                    elif foulType == "Common" and (team2Fouls >= bonus or team2Last2MinFouls >= 2):
-                        #print("Common Foul")  ###
-                        common1 += 1  ###
-                        foulType = "Shooting"
-                        shooting1 -= 1
-                    elif foulType == "And1_2":
-                        #print("And1 2")  ###
-                        make2_1 += 1
-                        team1Score += 2
-                        freeThrow = choice(["Make", "Miss"], 1,
-                                           p=[team1.teamFreeThrowPerc, (1 - team1.teamFreeThrowPerc)])
-                        if freeThrow == "Make":
-                            #print("Made FT")  ###
-                            ftMake1 += 1  ###
-                            team1Score += 1
-                            possession = 2
-                        elif freeThrow == "Miss":
-                            #print("Missed FT")  ###
-                            ftMiss1 += 1  ###
-                            possession = choice([1, 2], 1, p=[team1OREBPerc, team2DREBPerc])
-                            if possession == 1:
-                                #print("OREB")
-                                poss -= 1
-                                time += timePerPossession
-                    elif foulType == "And1_3":
-                        #print("And1 3")  ###
-                        make3_1 += 1
-                        team1Score += 3
-                        freeThrow = choice(["Make", "Miss"], 1,
-                                           p=[team1.teamFreeThrowPerc, (1 - team1.teamFreeThrowPerc)])
-                        if freeThrow == "Make":
-                            #print("Made FT")  ###
-                            ftMake1 += 1  ###
-                            team1Score += 1
-                            possession = 2
-                        elif freeThrow == "Miss":
-                            #print("Missed FT")  ###
-                            ftMiss1 += 1  ###
-                            possession = choice([1, 2], 1, p=[team1OREBPerc, team2DREBPerc])
-                            if possession == 1:
-                                #print("OREB")
-                                poss -= 1
-                                time += timePerPossession
-                    if foulType == "Shooting":
-                        shooting1 += 1  ###
-                        #print("Shooting Foul")  ###
-                        freeThrow1 = choice(["Make", "Miss"], 1,
-                                            p=[team1.teamFreeThrowPerc, (1 - team1.teamFreeThrowPerc)])
-                        if freeThrow1 == "Make":
-                            #print("Made FT")  ###
-                            ftMake1 += 1  ###
-                            team1Score += 1
-                        elif freeThrow1 == "Miss":
-                            #print("Missed FT")  ###
-                            ftMiss1 += 1  ###
-                        freeThrow2 = choice(["Make", "Miss"], 1,
-                                            p=[team1.teamFreeThrowPerc, (1 - team1.teamFreeThrowPerc)])
-                        if freeThrow2 == "Make":
-                            #print("Made FT")  ###
-                            ftMake1 += 1  ###
-                            team1Score += 1
-                            possession = 2
-                        elif freeThrow2 == "Miss":
-                            #print("Missed FT")  ###
-                            ftMiss1 += 1  ###
-                            possession = choice([1, 2], 1, p=[team1OREBPerc, team2DREBPerc])
-                            if possession == 1:
-                                #print("OREB")
-                                poss -= 1
-                                time += timePerPossession
-                time -= timePerPossession
-            if possession == 2:
-                poss += 1
-                #print("BKN Ball")
-                outcome = choice(["Shot", "Turnover", "Foul"], 1,
-                                 p=[team2ShotFrequency, team2TurnoverPerc, team1PFPerc])
-                if outcome == "Shot":
-                    shot2 += 1  ###
-                    shotType = choice(["Two", "Three"], 1, p=[team2.twoFrequency, team2.threeFrequency])
-                    if shotType == "Two":
-                        shot = choice(["Make", "Miss"], 1, p=[team2TwoPerc, (1 - team2TwoPerc)])
-                        if shot == "Make":
-                            #print("Made 2")  ###
-                            make2_2 += 1  ###
-                            team2Score += 2
-                            possession = 1
-                        elif shot == "Miss":
-                            #print("Missed 2")  ###
-                            miss2_2 += 1  ###
-                            possession = choice([2, 1], 1, p=[team2OREBPerc, team1DREBPerc])
-                            if possession == 2:
-                                # print("OREB")
-                                poss -= 1
-                                time += timePerPossession
-                    if shotType == "Three":
-                        shot = choice(["Make", "Miss"], 1, p=[team2ThreePerc, (1 - team2ThreePerc)])
-                        if shot == "Make":
-                            #print("Made 3")  ###
-                            make3_2 += 1  ###
-                            team2Score += 3
-                            possession = 1
-                        elif shot == "Miss":
-                            #print("Missed 3")  ###
-                            miss3_2 += 1  ###
-                            possession = choice([2, 1], 1, p=[team2OREBPerc, team1DREBPerc])
-                            if possession == 2:
-                                # print("OREB")
-                                poss -= 1
-                                time += timePerPossession
-                elif outcome == "Turnover":
-                    #print("Turnover")  ###
-                    to2 += 1  ###
-                    possession = 1
-                elif outcome == "Foul":
-                    foul2 += 1  ###
-                    team1Fouls += 1
-                    if time <= 120:
-                        team1Last2MinFouls += 1
-                    foulType = choice(["Common", "Shooting"], 1, p=[(1 - team1ShootingFoulPerc), team1ShootingFoulPerc])
-                    if foulType == "Shooting":
-                        shot2 += 1  ###
-                        foulType = choice(["Shooting", "And1_2", "And1_3"], 1,
-                                          p=[(1 - team2.twoPointAnd1Chance - team2.threePointAnd1Chance),
-                                             team2.twoPointAnd1Chance, team2.threePointAnd1Chance])
-                    if foulType == "Common" and (team1Fouls < bonus and team1Last2MinFouls < 2):
-                        #print("Common Foul")  ###
-                        common2 += 1  ###
+                #possessionPoints, possession, addTime, team2Fouls, team2Last2MinFouls = simPoss(team1, team1Stats, team2Stats, team2Fouls, team2Last2MinFouls, bonus, time)
+                off = team1
+                offStats = team1Stats
+                defStats = team2Stats
+                defFouls = team2Fouls
+                defLast2MinFouls = team2Last2MinFouls
+            else:
+                #possessionPoints, possession, addTime, team1Fouls, team1Last2MinFouls = simPoss(team2, team2Stats, team1Stats, team1Fouls, team1Last2MinFouls, bonus, time)
+                off = team2
+                offStats = team2Stats
+                defStats = team1Stats
+                defFouls = team1Fouls
+                defLast2MinFouls = team1Last2MinFouls
+            # sim possession
+            outcome = choice(["Shot", "Turnover", "Foul"], 1,
+                             p=[offStats['ShotFreq'], offStats['TO%'], defStats['PF%']])
+            if outcome == "Shot":
+                shotType = choice(["Two", "Three"], 1, p=[off.twoFrequency, off.threeFrequency])
+                if shotType == "Two":
+                    shot = choice(["Make", "Miss"], 1, p=[offStats['2%'], (1 - offStats['2%'])])
+                    if shot == "Make":
+                        possessionPoints += 2
                         possession = 2
-                    elif foulType == "Common" and (team1Fouls >= bonus or team1Last2MinFouls >= 2):
-                        #print("Common Foul")  ###
-                        common2 += 1  ###
-                        foulType = "Shooting"
-                        shooting2 -= 1
-                    elif foulType == "And1_2":
-                        #print("And1 2")  ###
-                        team2Score += 2
-                        freeThrow = choice(["Make", "Miss"], 1,
-                                           p=[team2.teamFreeThrowPerc, (1 - team2.teamFreeThrowPerc)])
-                        if freeThrow == "Make":
-                            #print("Made FT")  ###
-                            ftMake2 += 1  ###
-                            team2Score += 1
-                            possession = 1
-                        elif freeThrow == "Miss":
-                            #print("Missed FT")  ###
-                            ftMiss2 += 1  ###
-                            possession = choice([2, 1], 1, p=[team2OREBPerc, team1DREBPerc])
-                            if possession == 2:
-                                #print("OREB")
-                                poss -= 1
-                                time += timePerPossession
-                    elif foulType == "And1_3":
-                        #print("And1 3")  ###
-                        team2Score += 3
-                        freeThrow = choice(["Make", "Miss"], 1,
-                                           p=[team2.teamFreeThrowPerc, (1 - team2.teamFreeThrowPerc)])
-                        if freeThrow == "Make":
-                            #print("Made FT")  ###
-                            ftMake2 += 1  ###
-                            team2Score += 1
-                            possession = 1
-                        elif freeThrow == "Miss":
-                            #print("Missed FT")  ###
-                            ftMiss2 += 1  ###
-                            possession = choice([2, 1], 1, p=[team2OREBPerc, team1DREBPerc])
-                            if possession == 2:
-                                #print("OREB")
-                                poss -= 1
-                                time += timePerPossession
-                    if foulType == "Shooting":
-                        #print("Shooting Foul")
-                        shooting2 += 1  ###
-                        freeThrow1 = choice(["Make", "Miss"], 1,
-                                            p=[team2.teamFreeThrowPerc, (1 - team2.teamFreeThrowPerc)])
-                        if freeThrow1 == "Make":
-                            ftMake2 += 1  ###
-                            #print("Made FT")  ###
-                            team2Score += 1
-                        elif freeThrow1 == "Miss":
-                            #print("Missed FT")  ###
-                            ftMiss2 += 1  ###
-                        freeThrow2 = choice(["Make", "Miss"], 1,
-                                            p=[team2.teamFreeThrowPerc, (1 - team2.teamFreeThrowPerc)])
-                        if freeThrow2 == "Make":
-                            #print("Made FT")  ###
-                            ftMake2 += 1  ###
-                            team2Score += 1
-                            possession = 1
-                        elif freeThrow2 == "Miss":
-                            #print("Missed FT")  ###
-                            ftMiss2 += 1  ###
-                            possession = choice([2, 1], 1, p=[team2OREBPerc, team1DREBPerc])
-                            if possession == 2:
-                                #print("OREB")
-                                poss -= 1
-                                time += timePerPossession
+                    elif shot == "Miss":
+                        possession = choice([1, 2], 1, p=[offStats['OREB%'], defStats['DREB%']])
+                        if possession == 1:
+                            # right now oreb doesn't start new possession, so time and possession taken off for possession
+                            # is put back on
+                            addTime = True
+                if shotType == "Three":
+                    shot = choice(["Make", "Miss"], 1, p=[offStats['3%'], (1 - offStats['3%'])])
+                    if shot == "Make":
+                        possessionPoints += 3
+                        possession = 2
+                    elif shot == "Miss":
+                        possession = choice([1, 2], 1, p=[offStats['OREB%'], defStats['DREB%']])
+                        if possession == 1:
+                            addTime = True
+            elif outcome == "Turnover":
+                possession = 2
+            elif outcome == "Foul":
+                defFouls += 1
+                if time <= 120:
+                    defLast2MinFouls += 1
+                foulType = choice(["Common", "Shooting"], 1, p=[(1 - defStats['SF%']), defStats['SF%']])
+                if foulType == "Shooting":
+                    foulType = choice(["Shooting", "And1_2", "And1_3"], 1,
+                                      p=[(1 - off.twoPointAnd1Chance - off.threePointAnd1Chance),
+                                         off.twoPointAnd1Chance, off.threePointAnd1Chance])
+                if foulType == "Common" and (defFouls < bonus and defLast2MinFouls < 2):
+                    possession = 1
+                elif foulType == "Common" and (defFouls >= bonus or defLast2MinFouls >= 2):
+                    foulType = "Shooting"
+                elif foulType == "And1_2":
+                    possessionPoints += 2
+                    freeThrow = choice(["Make", "Miss"], 1,
+                                       p=[off.teamFreeThrowPerc, (1 - off.teamFreeThrowPerc)])
+                    if freeThrow == "Make":
+                        possessionPoints += 1
+                        possession = 2
+                    elif freeThrow == "Miss":
+                        possession = choice([1, 2], 1, p=[offStats['OREB%'], defStats['DREB%']])
+                        if possession == 1:
+                            addTime = True
+                elif foulType == "And1_3":
+                    possessionPoints += 3
+                    freeThrow = choice(["Make", "Miss"], 1,
+                                       p=[off.teamFreeThrowPerc, (1 - off.teamFreeThrowPerc)])
+                    if freeThrow == "Make":
+                        possessionPoints += 1
+                        possession = 2
+                    elif freeThrow == "Miss":
+                        possession = choice([1, 2], 1, p=[offStats['OREB%'], defStats['DREB%']])
+                        if possession == 1:
+                            addTime = True
+                if foulType == "Shooting":
+                    freeThrow1 = choice(["Make", "Miss"], 1,
+                                        p=[off.teamFreeThrowPerc, (1 - off.teamFreeThrowPerc)])
+                    if freeThrow1 == "Make":
+                        possessionPoints += 1
+                    elif freeThrow1 == "Miss":
+                        possessionPoints += 0
+                    freeThrow2 = choice(["Make", "Miss"], 1,
+                                        p=[off.teamFreeThrowPerc, (1 - off.teamFreeThrowPerc)])
+                    if freeThrow2 == "Make":
+                        possessionPoints += 1
+                        possession = 2
+                    elif freeThrow2 == "Miss":
+                        possession = choice([1, 2], 1, p=[offStats['OREB%'], defStats['DREB%']])
+                        if possession == 1:
+                            # print("OREB")
+                            addTime = True
+            # add points and handle possession
+            if off == team1:
+                team1Score += possessionPoints
+            else:
+                team2Score += possessionPoints
+                # in simPoss, possession is 1 for offense, 2 for defense, not team1 and team2, so it has to be flipped
+                # after team2 is on offense
+                if possession == 1:
+                    possession = 2
+                else:
+                    possession = 1
+            # if OREB, still same poss, so don't subtract time
+            if not addTime:
                 time -= timePerPossession
         quarter += 1
-        team1TotalFouls += team1Fouls ###
-        team2TotalFouls += team2Fouls ###
-    '''print(f'Possessions: {poss}')
-    print(f'Teams 1 shots, TOs, PFs: {shot1, to1, team1Fouls}')
-    print('Team 1 Made 2s, Missed 2s, Made 3s, Missed 3s, Common PFs, Shooting PFs, FTs Made, FTs Missed:')
-    print(f'\t{make2_1, miss2_1, make3_1, miss3_1, common1, shooting1, ftMake1, ftMiss1}')
-    print(f'Teams 2 shots, TOs, PFs: {shot2, to2, team2Fouls}')
-    print('Team 1 Made 2s, Missed 2s, Made 3s, Missed 3s, Common PFs, Shooting PFs, FTs Made, FTs Missed:')
-    print(f'\t{make2_2, miss2_2, make3_2, miss3_2, common2, shooting2, ftMake2, ftMiss2}')'''
-    if DEBUG_STATS:
-        games += 1
-        possessions += poss
-        shots += shot1 + shot2
-        TOs += to1 + to2
-        PFs += team1TotalFouls + team2TotalFouls
-        made2s += make2_1 + make2_2
-        attempted2s += make2_1 + make2_2 + miss2_1 + miss2_2
-        made3s += make3_1 + make3_2
-        attempted3s += make3_1 + make3_2 + miss3_1 + miss3_2
-        commonPFs += common1 + common2
-        shootingPFs += shooting1 + shooting2
-        madeFTs += ftMake1 + ftMake2
-        attemptedFTs += ftMake1 + ftMake2 + ftMiss1 + ftMiss2
-        simScore_1 += team1Score
-        simScore_2 += team2Score
-        if team1Score > team2Score:
-            score_1 += team1Score
-            score_2 += team2Score
-        else:
-            score_1 += team2Score
-            score_2 += team1Score
+
     if team1Score > team2Score:
         print(team1Abb + " beat " + team2Abb + " by a score of " + str(team1Score) + " to " + str(team2Score))
         return team1Abb, team1Score, team2Score
@@ -438,8 +306,6 @@ def singleGameSim(team1Abb, team2Abb, team1=None, team2=None):
         print(team2Abb + " beat " + team1Abb + " by a score of " + str(team2Score) + " to " + str(team1Score))
         return team2Abb, team1Score, team2Score
 
-
-# singleGameSim("BOS", "BKN")
 
 def seriesSim(team1Abb, team2Abb, team1=None, team2=None):
     if team1Abb == 'Select' or team2Abb == 'Select':
@@ -457,32 +323,33 @@ def seriesSim(team1Abb, team2Abb, team1=None, team2=None):
         elif team2Score > team1Score:
             team2Wins += 1
     if team1Wins == 4:
-        #print(team1Abb + " wins the series 4 games to " + str(team2Wins))
-        report = team1Abb + " wins the series vs " + team2Abb + " 4 games to " + str(team2Wins) + '\n'
+        report = team1Abb + " wins the series vs " + team2Abb + " 4 games to " + str(team2Wins)
         return team1Abb, team1Wins, team2Wins, report
     elif team2Wins == 4:
-        #print(team2Abb + " wins the series 4 games to " + str(team1Wins))
-        report = team2Abb + " wins the series vs " + team1Abb + " 4 games to " + str(team1Wins) + '\n'
+        report = team2Abb + " wins the series vs " + team1Abb + " 4 games to " + str(team1Wins)
         return team2Abb, team1Wins, team2Wins, report
 
-
-# seriesSim("BOS", "BKN")
 
 def seasonSim():
     seasonReport = ""
     teamsList, eastTeamsList, westTeamsList = initializeTeams()
-    if SEASONSTART:
+    if bi.SEASONSTART:
         for key, value in teamsList.items():
             teamsList[key].wins = 0
             teamsList[key].losses = 0
     schedule = readScheduleFile()
+    today = date.today()
+    today = int(today.strftime("%Y%m%d"))
+    # for day in schedule file
     for key, value in schedule.items():
-        if key < SEASONSTARTDATE:
+        # if day is already past, skip
+        if key < bi.SEASONSTARTDATE or key < today:
             continue
         else:
             teamNames = value
             numOfGames = (len(teamNames) / 2)
             gamesPlayed = 0
+            # sim each game in day
             while gamesPlayed < numOfGames:
                 team1Name = teamNames[gamesPlayed * 2]
                 team2Name = teamNames[(gamesPlayed * 2) + 1]
@@ -498,12 +365,12 @@ def seasonSim():
                     teamsList[team1Name].losses += 1
                 gamesPlayed += 1
     seasonReport += "Season Standings:\n"
+    # get team records
     for team in eastTeamsList.values():
-        #print(team.abbreviation, team.wins, team.losses)
         seasonReport += team.abbreviation + ": " + str(team.wins) + "-" + str(team.losses) + "\n"
     for team in westTeamsList.values():
-        #print(team.abbreviation, team.wins, team.losses)
         seasonReport += team.abbreviation + ": " + str(team.wins) + "-" + str(team.losses) + "\n"
+    # seed teams
     eastTeamsList, westTeamsList = seedTeams(eastTeamsList, westTeamsList)
 
     east1 = eastTeamsList[0][1].abbreviation
@@ -583,87 +450,81 @@ def seasonSim():
     seasonReport += "\nEast Round 1:\n"
     winnerEast1_8, team1Wins, team2Wins, report = seriesSim(east1, east8, teamsList[convertAbbToName(east1)],
                                                             teamsList[convertAbbToName(east8)])
-    seasonReport += report
+    seasonReport += report + '\n'
     winnerEast2_7, team1Wins, team2Wins, report = seriesSim(east2, east7, teamsList[convertAbbToName(east2)],
                                                             teamsList[convertAbbToName(east7)])
-    seasonReport += report
+    seasonReport += report + '\n'
     winnerEast3_6, team1Wins, team2Wins, report = seriesSim(east3, east6, teamsList[convertAbbToName(east3)],
                                                             teamsList[convertAbbToName(east6)])
-    seasonReport += report
+    seasonReport += report + '\n'
     winnerEast4_5, team1Wins, team2Wins, report = seriesSim(east4, east5, teamsList[convertAbbToName(east4)],
                                                             teamsList[convertAbbToName(east5)])
-    seasonReport += report
+    seasonReport += report + '\n'
     # WEST 1ST RND
     seasonReport += "\nWest Round 1:\n"
     winnerWest1_8, team1Wins, team2Wins, report = seriesSim(west1, west8, teamsList[convertAbbToName(west1)],
                                                             teamsList[convertAbbToName(west8)])
-    seasonReport += report
+    seasonReport += report + '\n'
     winnerWest2_7, team1Wins, team2Wins, report = seriesSim(west2, west7, teamsList[convertAbbToName(west2)],
                                                             teamsList[convertAbbToName(west7)])
-    seasonReport += report
+    seasonReport += report + '\n'
     winnerWest3_6, team1Wins, team2Wins, report = seriesSim(west3, west6, teamsList[convertAbbToName(west3)],
                                                             teamsList[convertAbbToName(west6)])
-    seasonReport += report
+    seasonReport += report + '\n'
     winnerWest4_5, team1Wins, team2Wins, report = seriesSim(west4, west5, teamsList[convertAbbToName(west4)],
                                                             teamsList[convertAbbToName(west5)])
-    seasonReport += report
+    seasonReport += report + '\n'
     # EAST 2ND RND
     seasonReport += "\nEast Semifinals:\n"
     winnerEastSemis1, team1Wins, team2Wins, report = seriesSim(winnerEast1_8, winnerEast4_5,
                                                                teamsList[convertAbbToName(winnerEast1_8)],
                                                                teamsList[convertAbbToName(winnerEast4_5)])
-    seasonReport += report
+    seasonReport += report + '\n'
     winnerEastSemis2, team1Wins, team2Wins, report = seriesSim(winnerEast2_7, winnerEast3_6,
                                                                teamsList[convertAbbToName(winnerEast2_7)],
                                                                teamsList[convertAbbToName(winnerEast3_6)])
-    seasonReport += report
+    seasonReport += report + '\n'
     # WEST 2ND RND
     seasonReport += "\nWest Semifinals:\n"
     winnerWestSemis1, team1Wins, team2Wins, report = seriesSim(winnerWest1_8, winnerWest4_5,
                                                                teamsList[convertAbbToName(winnerWest1_8)],
                                                                teamsList[convertAbbToName(winnerWest4_5)])
-    seasonReport += report
+    seasonReport += report + '\n'
     winnerWestSemis2, team1Wins, team2Wins, report = seriesSim(winnerWest2_7, winnerWest3_6,
                                                                teamsList[convertAbbToName(winnerWest2_7)],
                                                                teamsList[convertAbbToName(winnerWest3_6)])
-    seasonReport += report
+    seasonReport += report + '\n'
     # EAST FINALS
     seasonReport += "\nEast Finals:\n"
     winnerEastFinals, team1Wins, team2Wins, report = seriesSim(winnerEastSemis1, winnerEastSemis2,
                                                                teamsList[convertAbbToName(winnerEastSemis1)],
                                                                teamsList[convertAbbToName(winnerEastSemis2)])
-    seasonReport += report
+    seasonReport += report + '\n'
     # WEST FINALS
     seasonReport += "\nWest Finals:\n"
     winnerWestFinals, team1Wins, team2Wins, report = seriesSim(winnerWestSemis1, winnerWestSemis2,
                                                                teamsList[convertAbbToName(winnerWestSemis1)],
                                                                teamsList[convertAbbToName(winnerWestSemis2)])
-    seasonReport += report
+    seasonReport += report + '\n'
     # FINALS
     seasonReport += "\nNBA Finals:\n"
     winnerFinals, team1WinsFinals, team2WinsFinals, report = seriesSim(winnerEastFinals, winnerWestFinals,
                                                                        teamsList[convertAbbToName(winnerEastFinals)],
                                                                        teamsList[convertAbbToName(winnerWestFinals)])
-    seasonReport += report
+    seasonReport += report + '\n'
     seasonReport += winnerFinals + " wins the finals!\n"
 
-    if DEBUG_STATS:
-        global games, possessions, shots, TOs, PFs, made2s, attempted2s, made3s, attempted3s, commonPFs, shootingPFs, \
-            madeFTs, attemptedFTs, score_1, score_2, simScore_1, simScore_2
-        print(f'Num of games: {games}')
-        print(f'Poss/G, Shots/G, TOs/G: {possessions/games, shots/games, TOs/games}\n'
-              f'PFs/G, Common PFs/G, Shooting PFs/G, FTs/Game: {PFs/games, commonPFs/games, shootingPFs/games, attemptedFTs/games}\n'
-              f'2%, 3%, FT%: {made2s/attempted2s, made3s/attempted3s, madeFTs/attemptedFTs}\n'
-              f'Score 1, Score 2, SimScore 1, SimScore2: {score_1/games, score_2/games, simScore_1/games, simScore_2/games}')
     return seasonReport
 
 
 def seedTeams(eastTeamsList, westTeamsList):
+    # sort teams by wins
+    # need to implement tiebreakers for if wins are equal
     seededTeamsEast = sorted(eastTeamsList.items(), key=lambda x: x[1].wins, reverse=True)
     seededTeamsWest = sorted(westTeamsList.items(), key=lambda x: x[1].wins, reverse=True)
     return seededTeamsEast, seededTeamsWest
 
-
+# team names are corresponding abbreviations
 def initializeTeams():
     eastTeamsList = {
         'Atlanta': Teams[convertNameToAbb("Atlanta")],
@@ -800,8 +661,9 @@ def convertNameToAbb(name):
         teamAbb = teamInfo[0]['abbreviation']
     return teamAbb
 
-
+# can this be integrated into convertNameToAbb
 def convertAbbToName(abb):
+    # could use switch instead or make else if, else for incorrect abb
     if abb == "ATL":
         name = "Atlanta"
     if abb == "BOS":
@@ -863,4 +725,5 @@ def convertAbbToName(abb):
     if abb == "UTA":
         name = "Utah"
     return name
-from nbaSim import Teams
+
+from pyFiles.nbaSim import Teams

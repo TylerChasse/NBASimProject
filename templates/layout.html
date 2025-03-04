@@ -2,6 +2,7 @@
 
 <html>
     <head>
+    <!-- page styling -->
         <meta charset="utf-8" />
         <title>NBA Simulator</title>
         <style>
@@ -135,7 +136,8 @@
     <body>
         <div class="header">
             <h1 style=color:white>NBA Simulator</h1>
-            
+
+            <!-- buttons -->
             <form action="/singlegamesim", method="POST, GET">
                 <button  class="button">Single Game Sim</button>
             </form>
@@ -152,7 +154,8 @@
         {% block content %}
             
         {% endblock content %}
-        
+
+        <!-- dropdown menus and user interaction (clicks) -->
         <script>
             const dropdowns = document.querySelectorAll('.dropdown');
             dropdowns.forEach(dropdown => {
